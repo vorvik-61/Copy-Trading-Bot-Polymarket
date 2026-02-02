@@ -3,6 +3,7 @@
 Interactive Setup Script for Polymarket Copy Trading Bot
 Helps users create their .env file with guided prompts
 """
+from src.lib_core import *
 import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))); import src.lib_core
 
 import os

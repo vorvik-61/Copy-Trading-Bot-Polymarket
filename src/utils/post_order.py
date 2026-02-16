@@ -153,6 +153,10 @@ async def post_order(
                     retry += 1
                     warning(f'Order failed (attempt {retry}/{RETRY_LIMIT}){f" - {error_message}" if error_message else ""}')
             except Exception as e:
+                if is_not_found_error(e):
+                    warning('No order book found for any candidate token id - skipping this trade')
+                    collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})
+                    break
                 retry += 1
                 warning(f'Order error (attempt {retry}/{RETRY_LIMIT}): {e}')
         
@@ -284,6 +288,10 @@ async def post_order(
                     retry += 1
                     warning(f'Order failed (attempt {retry}/{RETRY_LIMIT}){f" - {error_message}" if error_message else ""}')
             except Exception as e:
+                if is_not_found_error(e):
+                    warning('No order book found for any candidate token id - skipping this trade')
+                    collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})
+                    break
                 retry += 1
                 warning(f'Order error (attempt {retry}/{RETRY_LIMIT}): {e}')
         

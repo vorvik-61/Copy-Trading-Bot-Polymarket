@@ -58,56 +58,6 @@ def is_not_found_error(err: Exception) -> bool:
     return '404' in str(err) and 'book?token_id=' in str(err)
 
 
-async def fetch_json_if_ok(url: str) -> Optional[Any]:
-    """Fetch JSON from URL and return None on HTTP/network errors."""
-    import httpx
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(url)
-            if response.status_code != 200:
-                return None
-            return response.json()
-    except Exception:
-        return None
-
-
-def extract_token_ids_from_market_payload(payload: Any) -> List[str]:
-    """Extract token ids from a CLOB/Gamma market payload with flexible schema handling."""
-    markets: List[Dict[str, Any]] = []
-
-    if isinstance(payload, dict):
-        data = payload.get('data')
-        if isinstance(data, list):
-            markets.extend([m for m in data if isinstance(m, dict)])
-        elif isinstance(data, dict):
-            markets.append(data)
-        markets.append(payload)
-    elif isinstance(payload, list):
-        markets.extend([m for m in payload if isinstance(m, dict)])
-
-    token_ids: List[str] = []
-    seen = set()
-    for market in markets:
-        tokens = market.get('tokens')
-        if not isinstance(tokens, list):
-            continue
-
-        for token in tokens:
-            if not isinstance(token, dict):
-                continue
-            token_id = token.get('token_id') or token.get('tokenId') or token.get('id')
-            if token_id is None:
-                continue
-            token_id_str = str(token_id).strip()
-            if not token_id_str or token_id_str in seen:
-                continue
-            seen.add(token_id_str)
-            token_ids.append(token_id_str)
-
-    return token_ids
-
-
 async def post_order(
     clob_client: Any,
     condition: str,
@@ -121,91 +71,19 @@ async def post_order(
     """Post order to Polymarket"""
     collection = get_user_activity_collection(user_address)
 
-    async def discover_execution_asset_candidates() -> List[str]:
-        """Discover candidate token ids from CLOB/Gamma market metadata using conditionId."""
-        condition_id = trade.get('conditionId')
-        if not condition_id:
-            return []
+    def resolve_execution_asset() -> Optional[str]:
+        """Resolve the most reliable token id for book/order operations."""
+        trade_asset = trade.get('asset')
+        if isinstance(trade_asset, str) and trade_asset.strip():
+            return trade_asset
 
-        # Try both CLOB and Gamma, with schema/key variations.
-        clob_host = getattr(clob_client, 'host', 'https://clob.polymarket.com').rstrip('/')
-        condition_id_str = str(condition_id)
-        urls = [
-            f"{clob_host}/markets?condition_id={condition_id_str}",
-            f"{clob_host}/markets?conditionId={condition_id_str}",
-            f"https://gamma-api.polymarket.com/markets?conditionId={condition_id_str}",
-            f"https://gamma-api.polymarket.com/markets?condition_id={condition_id_str}",
-        ]
+        if my_position and my_position.get('asset'):
+            return my_position.get('asset')
 
-        discovered: List[str] = []
-        seen = set()
-        for url in urls:
-            payload = await fetch_json_if_ok(url)
-            if payload is None:
-                continue
-            for token_id in extract_token_ids_from_market_payload(payload):
-                if token_id in seen:
-                    continue
-                seen.add(token_id)
-                discovered.append(token_id)
+        if user_position and user_position.get('asset'):
+            return user_position.get('asset')
 
-        return discovered
-
-    def resolve_execution_asset_candidates(order_condition: str) -> List[str]:
-        """Build prioritized candidate token IDs for order book/order creation."""
-        # BUY should prefer trader's current position token. MERGE/SELL should prefer our token.
-        candidate_values: List[Any] = []
-        if order_condition == 'buy':
-            candidate_values.extend([
-                user_position.get('asset') if user_position else None,
-                trade.get('asset'),
-                my_position.get('asset') if my_position else None,
-            ])
-        else:
-            candidate_values.extend([
-                my_position.get('asset') if my_position else None,
-                trade.get('asset'),
-                user_position.get('asset') if user_position else None,
-            ])
-
-        # Also consider opposite asset if available (can help when RTDS payload points to opposite side).
-        if my_position and my_position.get('oppositeAsset'):
-            candidate_values.append(my_position.get('oppositeAsset'))
-        if user_position and user_position.get('oppositeAsset'):
-            candidate_values.append(user_position.get('oppositeAsset'))
-
-        candidates: List[str] = []
-        seen = set()
-        for value in candidate_values:
-            if value is None:
-                continue
-            token = str(value).strip()
-            if not token or token in seen:
-                continue
-            seen.add(token)
-            candidates.append(token)
-        return candidates
-
-    async def get_order_book_with_fallback(asset_candidates: List[str]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-        """Try candidate token IDs until an order book is found or all candidates fail."""
-        if not asset_candidates:
-            return None, None
-
-        last_error: Optional[Exception] = None
-        for token_id in asset_candidates:
-            try:
-                order_book = await clob_client.get_order_book(token_id)
-                return order_book, token_id
-            except Exception as e:
-                last_error = e
-                if is_not_found_error(e):
-                    warning(f'Order book not found for token_id={token_id}; trying next candidate if available')
-                    continue
-                raise
-
-        if last_error:
-            raise last_error
-        return None, None
+        return None
     
     if condition == 'merge':
         info('Executing MERGE strategy...')
@@ -215,11 +93,9 @@ async def post_order(
             return
         
         remaining = my_position.get('size', 0)
-        execution_asset_candidates = resolve_execution_asset_candidates('merge')
-        discovered_candidates = await discover_execution_asset_candidates()
-        execution_asset_candidates.extend([c for c in discovered_candidates if c not in execution_asset_candidates])
+        execution_asset = resolve_execution_asset()
 
-        if not execution_asset_candidates:
+        if not execution_asset:
             warning('Missing token id for merge order - skipping')
             collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})
             return
@@ -235,11 +111,7 @@ async def post_order(
         
         while remaining > 0 and retry < RETRY_LIMIT:
             try:
-                order_book, execution_asset = await get_order_book_with_fallback(execution_asset_candidates)
-                if not order_book or not execution_asset:
-                    warning('No valid token id found for merge order - skipping')
-                    collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})
-                    break
+                order_book = await clob_client.get_order_book(execution_asset)
                 if not order_book.get('bids') or len(order_book['bids']) == 0:
                     warning('No bids available in order book')
                     collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})
@@ -305,11 +177,9 @@ async def post_order(
     
     elif condition == 'buy':
         info('Executing BUY strategy...')
-        execution_asset_candidates = resolve_execution_asset_candidates('buy')
-        discovered_candidates = await discover_execution_asset_candidates()
-        execution_asset_candidates.extend([c for c in discovered_candidates if c not in execution_asset_candidates])
+        execution_asset = resolve_execution_asset()
 
-        if not execution_asset_candidates:
+        if not execution_asset:
             warning('Missing token id for buy order - skipping')
             collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})
             return
@@ -348,11 +218,7 @@ async def post_order(
         
         while remaining > 0 and retry < RETRY_LIMIT:
             try:
-                order_book, execution_asset = await get_order_book_with_fallback(execution_asset_candidates)
-                if not order_book or not execution_asset:
-                    warning('No valid token id found for buy order - skipping')
-                    collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})
-                    break
+                order_book = await clob_client.get_order_book(execution_asset)
                 if not order_book.get('asks') or len(order_book['asks']) == 0:
                     warning('No asks available in order book')
                     collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})

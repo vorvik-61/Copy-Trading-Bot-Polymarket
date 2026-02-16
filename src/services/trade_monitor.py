@@ -315,18 +315,30 @@ async def connect_rtds():
 
                 data = json.loads(message)
 
+                # Some RTDS frames may deliver a list of envelopes.
+                if isinstance(data, list):
+                    for item in data:
+                        if isinstance(item, dict) and item.get('topic') == 'activity' and item.get('type') == 'trades' and item.get('payload'):
+                            activity = item['payload']
+                            trader_address = str(activity.get('proxyWallet', '')).lower()
+                            if trader_address in [addr.lower() for addr in USER_ADDRESSES]:
+                                await process_trade_activity(activity, trader_address)
+                    continue
+
+                if not isinstance(data, dict):
+                    continue
+
                 # Handle subscription confirmation
                 if isinstance(data, dict) and (data.get('action') == 'subscribed' or data.get('status') == 'subscribed'):
                     info('RTDS subscription confirmed')
                     continue
-
-                payloads = extract_activity_payloads(data)
-                if not payloads:
-                    continue
-
-                for activity in payloads:
-                    trader_address = extract_trader_address(activity)
-                    if trader_address and trader_address in WATCHED_ADDRESSES:
+                
+                # Handle trade activity messages
+                if data.get('topic') == 'activity' and data.get('type') == 'trades' and data.get('payload'):
+                    activity = data['payload']
+                    trader_address = str(activity.get('proxyWallet', '')).lower()
+                    
+                    if trader_address in [addr.lower() for addr in USER_ADDRESSES]:
                         await process_trade_activity(activity, trader_address)
                     elif trader_address is None and len(USER_ADDRESSES) == 1:
                         await process_trade_activity(activity, USER_ADDRESSES[0].lower())

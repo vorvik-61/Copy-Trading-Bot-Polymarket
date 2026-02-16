@@ -33,6 +33,45 @@ AggregatedTrade = Dict[str, Any]
 trade_aggregation_buffer: Dict[str, AggregatedTrade] = {}
 
 
+def select_position_for_trade(positions: List[Dict[str, Any]], trade: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Select the most relevant position for a trade, preferring exact token/outcome match."""
+    if not positions:
+        return None
+
+    condition_id = trade.get('conditionId')
+    trade_asset = str(trade.get('asset')) if trade.get('asset') is not None else None
+    outcome_index = trade.get('outcomeIndex')
+    outcome = trade.get('outcome')
+
+    condition_matches = [p for p in positions if p.get('conditionId') == condition_id]
+    if not condition_matches:
+        return None
+
+    if trade_asset:
+        exact_asset = [p for p in condition_matches if str(p.get('asset')) == trade_asset]
+        if exact_asset:
+            return exact_asset[0]
+
+        opposite_asset = [p for p in condition_matches if str(p.get('oppositeAsset')) == trade_asset]
+        if opposite_asset:
+            return opposite_asset[0]
+
+    if outcome_index is not None:
+        idx_matches = [p for p in condition_matches if p.get('outcomeIndex') == outcome_index]
+        if idx_matches:
+            return idx_matches[0]
+
+    if outcome:
+        outcome_matches = [
+            p for p in condition_matches
+            if str(p.get('outcome', '')).strip().lower() == str(outcome).strip().lower()
+        ]
+        if outcome_matches:
+            return outcome_matches[0]
+
+    return condition_matches[0]
+
+
 async def read_temp_trades() -> List[TradeWithUser]:
     """Read unprocessed trades from database"""
     all_trades: List[TradeWithUser] = []
@@ -162,14 +201,8 @@ async def do_trading(clob_client: Any, trades: List[TradeWithUser]) -> None:
         my_positions_list = my_positions_data if isinstance(my_positions_data, list) else []
         user_positions_list = user_positions_data if isinstance(user_positions_data, list) else []
         
-        my_position = next(
-            (p for p in my_positions_list if p.get('conditionId') == trade.get('conditionId')),
-            None
-        )
-        user_position = next(
-            (p for p in user_positions_list if p.get('conditionId') == trade.get('conditionId')),
-            None
-        )
+        my_position = select_position_for_trade(my_positions_list, trade)
+        user_position = select_position_for_trade(user_positions_list, trade)
         
         # Get USDC balance
         my_balance = await get_my_balance_async(PROXY_WALLET)
@@ -216,15 +249,17 @@ async def do_aggregated_trading(clob_client: Any, aggregated_trades: List[Aggreg
         
         my_positions_list = my_positions_data if isinstance(my_positions_data, list) else []
         user_positions_list = user_positions_data if isinstance(user_positions_data, list) else []
-        
-        my_position = next(
-            (p for p in my_positions_list if p.get('conditionId') == agg.get('conditionId')),
-            None
-        )
-        user_position = next(
-            (p for p in user_positions_list if p.get('conditionId') == agg.get('conditionId')),
-            None
-        )
+
+        # Create a synthetic trade object for postOrder using aggregated values
+        synthetic_trade: TradeWithUser = {
+            **agg['trades'][0],  # Use first trade as template
+            'usdcSize': agg['totalUsdcSize'],
+            'price': agg['averagePrice'],
+            'side': agg.get('side', 'BUY'),
+        }
+
+        my_position = select_position_for_trade(my_positions_list, synthetic_trade)
+        user_position = select_position_for_trade(user_positions_list, synthetic_trade)
         
         # Get USDC balance
         my_balance = await get_my_balance_async(PROXY_WALLET)
@@ -233,14 +268,6 @@ async def do_aggregated_trading(clob_client: Any, aggregated_trades: List[Aggreg
         user_balance = sum(pos.get('currentValue', 0) or 0 for pos in user_positions_list)
         
         log_balance(my_balance, user_balance, agg['userAddress'])
-        
-        # Create a synthetic trade object for postOrder using aggregated values
-        synthetic_trade: TradeWithUser = {
-            **agg['trades'][0],  # Use first trade as template
-            'usdcSize': agg['totalUsdcSize'],
-            'price': agg['averagePrice'],
-            'side': agg.get('side', 'BUY'),
-        }
         
         # Execute the aggregated trade
         await post_order(

@@ -2,7 +2,7 @@
 Post order to Polymarket
 """
 import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))); import src.lib_core
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 from ..config.env import ENV
 from ..models.user_history import get_user_activity_collection
 from ..utils.logger import info, warning, order_result
@@ -51,6 +51,11 @@ def is_insufficient_balance_or_allowance_error(message: Optional[str]) -> bool:
         return False
     lower = message.lower()
     return 'not enough balance' in lower or 'allowance' in lower
+
+
+def is_not_found_error(err: Exception) -> bool:
+    """Check if exception indicates HTTP 404 from order book endpoint."""
+    return '404' in str(err) and 'book?token_id=' in str(err)
 
 
 async def post_order(
@@ -306,4 +311,3 @@ async def post_order(
         # Implementation similar to merge but for selling positions
         # This would be implemented based on the full TypeScript version
         collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})
-

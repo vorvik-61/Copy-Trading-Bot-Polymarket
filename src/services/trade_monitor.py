@@ -23,7 +23,7 @@ if not USER_ADDRESSES or len(USER_ADDRESSES) == 0:
     raise ValueError('USER_ADDRESSES is not defined or empty')
 
 # WebSocket connection state
-ws: Optional[websockets.client.WebSocketClientProtocol] = None
+ws: Optional[Any] = None
 reconnect_attempts = 0
 MAX_RECONNECT_ATTEMPTS = 10
 RECONNECT_DELAY = 5  # 5 seconds

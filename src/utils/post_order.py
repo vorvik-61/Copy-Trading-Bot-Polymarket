@@ -65,6 +65,20 @@ async def post_order(
 ):
     """Post order to Polymarket"""
     collection = get_user_activity_collection(user_address)
+
+    def resolve_execution_asset() -> Optional[str]:
+        """Resolve the most reliable token id for book/order operations."""
+        trade_asset = trade.get('asset')
+        if isinstance(trade_asset, str) and trade_asset.strip():
+            return trade_asset
+
+        if my_position and my_position.get('asset'):
+            return my_position.get('asset')
+
+        if user_position and user_position.get('asset'):
+            return user_position.get('asset')
+
+        return None
     
     if condition == 'merge':
         info('Executing MERGE strategy...')
@@ -74,6 +88,12 @@ async def post_order(
             return
         
         remaining = my_position.get('size', 0)
+        execution_asset = resolve_execution_asset()
+
+        if not execution_asset:
+            warning('Missing token id for merge order - skipping')
+            collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})
+            return
         
         # Check minimum order size
         if remaining < MIN_ORDER_SIZE_TOKENS:
@@ -86,7 +106,7 @@ async def post_order(
         
         while remaining > 0 and retry < RETRY_LIMIT:
             try:
-                order_book = await clob_client.get_order_book(trade['asset'])
+                order_book = await clob_client.get_order_book(execution_asset)
                 if not order_book.get('bids') or len(order_book['bids']) == 0:
                     warning('No bids available in order book')
                     collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})
@@ -99,14 +119,14 @@ async def post_order(
                 if remaining <= float(max_price_bid['size']):
                     order_args = {
                         'side': 'SELL',
-                        'tokenID': my_position['asset'],
+                        'tokenID': execution_asset,
                         'amount': remaining,
                         'price': float(max_price_bid['price']),
                     }
                 else:
                     order_args = {
                         'side': 'SELL',
-                        'tokenID': my_position['asset'],
+                        'tokenID': execution_asset,
                         'amount': float(max_price_bid['size']),
                         'price': float(max_price_bid['price']),
                     }
@@ -148,6 +168,12 @@ async def post_order(
     
     elif condition == 'buy':
         info('Executing BUY strategy...')
+        execution_asset = resolve_execution_asset()
+
+        if not execution_asset:
+            warning('Missing token id for buy order - skipping')
+            collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})
+            return
         
         info(f'Your balance: ${my_balance:.2f}')
         info(f'Trader bought: ${trade.get("usdcSize", 0):.2f}')
@@ -183,7 +209,7 @@ async def post_order(
         
         while remaining > 0 and retry < RETRY_LIMIT:
             try:
-                order_book = await clob_client.get_order_book(trade['asset'])
+                order_book = await clob_client.get_order_book(execution_asset)
                 if not order_book.get('asks') or len(order_book['asks']) == 0:
                     warning('No asks available in order book')
                     collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})
@@ -222,7 +248,7 @@ async def post_order(
                 
                 order_args = {
                     'side': 'BUY',
-                    'tokenID': trade['asset'],
+                    'tokenID': execution_asset,
                     'amount': order_size,
                     'price': float(min_price_ask['price']),
                 }

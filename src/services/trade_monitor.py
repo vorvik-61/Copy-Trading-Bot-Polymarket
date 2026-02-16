@@ -115,6 +115,21 @@ async def process_trade_activity(activity: Dict[str, Any], address: str):
     position_collection = get_user_position_collection(address)
     
     try:
+        if not isinstance(activity, dict):
+            return
+
+        # RTDS payloads may omit `asset`; fall back to token-id variants.
+        activity_asset = (
+            activity.get('asset')
+            or activity.get('tokenId')
+            or activity.get('tokenID')
+            or activity.get('makerAssetId')
+            or activity.get('takerAssetId')
+        )
+
+        if activity_asset is not None:
+            activity_asset = str(activity_asset)
+
         # Skip if too old
         activity_timestamp = activity.get('timestamp', 0)
         if activity_timestamp > 1000000000000:
@@ -142,7 +157,7 @@ async def process_trade_activity(activity: Dict[str, Any], address: str):
             'usdcSize': activity.get('price', 0) * activity.get('size', 0),
             'transactionHash': activity.get('transactionHash'),
             'price': activity.get('price'),
-            'asset': activity.get('asset'),
+            'asset': activity_asset,
             'side': activity.get('side'),
             'outcomeIndex': activity.get('outcomeIndex'),
             'title': activity.get('title'),
@@ -246,7 +261,24 @@ async def connect_rtds():
                 break
             
             try:
+                if not message or not str(message).strip():
+                    continue
+
                 data = json.loads(message)
+
+                # Some RTDS frames may deliver a list of envelopes.
+                if isinstance(data, list):
+                    for item in data:
+                        if isinstance(item, dict) and item.get('topic') == 'activity' and item.get('type') == 'trades' and item.get('payload'):
+                            activity = item['payload']
+                            trader_address = str(activity.get('proxyWallet', '')).lower()
+                            if trader_address in [addr.lower() for addr in USER_ADDRESSES]:
+                                await process_trade_activity(activity, trader_address)
+                    continue
+
+                if not isinstance(data, dict):
+                    continue
+
                 # Handle subscription confirmation
                 if data.get('action') == 'subscribed' or data.get('status') == 'subscribed':
                     info('RTDS subscription confirmed')
@@ -255,7 +287,7 @@ async def connect_rtds():
                 # Handle trade activity messages
                 if data.get('topic') == 'activity' and data.get('type') == 'trades' and data.get('payload'):
                     activity = data['payload']
-                    trader_address = activity.get('proxyWallet', '').lower()
+                    trader_address = str(activity.get('proxyWallet', '')).lower()
                     
                     if trader_address in [addr.lower() for addr in USER_ADDRESSES]:
                         await process_trade_activity(activity, trader_address)

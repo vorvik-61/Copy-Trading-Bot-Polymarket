@@ -6,6 +6,12 @@ import asyncio
 import httpx
 from typing import Any
 from ..config.env import ENV
+from ..utils.logger import info
+
+
+def _trace_enabled() -> bool:
+    """Enable verbose HTTP tracing for Polymarket API calls."""
+    return str(getattr(ENV, 'HTTP_TRACE_LOGS', True)).lower() in {'1', 'true', 'yes', 'on'}
 
 
 def is_network_error(error: Exception) -> bool:
@@ -26,6 +32,8 @@ async def fetch_data_async(url: str) -> Any:
 
     for attempt in range(1, retries + 1):
         try:
+            if _trace_enabled():
+                info(f'[HTTP TRACE] GET {url} (attempt {attempt}/{retries}, timeout={timeout_seconds:.1f}s)')
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.get(
                     url,
@@ -34,6 +42,8 @@ async def fetch_data_async(url: str) -> Any:
                     },
                 )
                 response.raise_for_status()
+                if _trace_enabled():
+                    info(f'[HTTP TRACE] Response {response.status_code} from {url}')
                 return response.json()
         except Exception as error:
             is_last_attempt = attempt == retries
@@ -65,4 +75,3 @@ def fetch_data(url: str) -> Any:
     except RuntimeError:
         # No event loop, create one
         return asyncio.run(fetch_data_async(url))
-

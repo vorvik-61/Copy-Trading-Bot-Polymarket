@@ -2,7 +2,7 @@
 Post order to Polymarket
 """
 import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))); import src.lib_core
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 from ..config.env import ENV
 from ..models.user_history import get_user_activity_collection
 from ..utils.logger import info, warning, order_result
@@ -53,6 +53,11 @@ def is_insufficient_balance_or_allowance_error(message: Optional[str]) -> bool:
     return 'not enough balance' in lower or 'allowance' in lower
 
 
+def is_not_found_error(err: Exception) -> bool:
+    """Check if exception indicates HTTP 404 from order book endpoint."""
+    return '404' in str(err) and 'book?token_id=' in str(err)
+
+
 async def post_order(
     clob_client: Any,
     condition: str,
@@ -65,6 +70,28 @@ async def post_order(
 ):
     """Post order to Polymarket"""
     collection = get_user_activity_collection(user_address)
+
+    info(
+        '[ORDER TRACE] '
+        f'condition={condition}, user={user_address[:6]}...{user_address[-4:]}, '
+        f'trade_side={trade.get("side")}, trade_asset={trade.get("asset")}, '
+        f'trade_condition_id={trade.get("conditionId")}, usdc_size={trade.get("usdcSize")}, '
+        f'price={trade.get("price")}, my_balance={my_balance:.4f}, user_balance={user_balance:.4f}'
+    )
+
+    def resolve_execution_asset() -> Optional[str]:
+        """Resolve the most reliable token id for book/order operations."""
+        trade_asset = trade.get('asset')
+        if isinstance(trade_asset, str) and trade_asset.strip():
+            return trade_asset
+
+        if my_position and my_position.get('asset'):
+            return my_position.get('asset')
+
+        if user_position and user_position.get('asset'):
+            return user_position.get('asset')
+
+        return None
     
     if condition == 'merge':
         info('Executing MERGE strategy...')
@@ -74,6 +101,12 @@ async def post_order(
             return
         
         remaining = my_position.get('size', 0)
+        execution_asset = resolve_execution_asset()
+
+        if not execution_asset:
+            warning('Missing token id for merge order - skipping')
+            collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})
+            return
         
         # Check minimum order size
         if remaining < MIN_ORDER_SIZE_TOKENS:
@@ -86,7 +119,7 @@ async def post_order(
         
         while remaining > 0 and retry < RETRY_LIMIT:
             try:
-                order_book = await clob_client.get_order_book(trade['asset'])
+                order_book = await clob_client.get_order_book(execution_asset)
                 if not order_book.get('bids') or len(order_book['bids']) == 0:
                     warning('No bids available in order book')
                     collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})
@@ -99,20 +132,23 @@ async def post_order(
                 if remaining <= float(max_price_bid['size']):
                     order_args = {
                         'side': 'SELL',
-                        'tokenID': my_position['asset'],
+                        'tokenID': execution_asset,
                         'amount': remaining,
                         'price': float(max_price_bid['price']),
                     }
                 else:
                     order_args = {
                         'side': 'SELL',
-                        'tokenID': my_position['asset'],
+                        'tokenID': execution_asset,
                         'amount': float(max_price_bid['size']),
                         'price': float(max_price_bid['price']),
                     }
                 
+                info(f'[ORDER TRACE] Creating signed order payload: {order_args}')
                 signed_order = await clob_client.create_market_order(order_args)
+                info('[ORDER TRACE] Submitting order to CLOB with type=FOK')
                 resp = await clob_client.post_order(signed_order, 'FOK')
+                info(f'[ORDER TRACE] CLOB response: {resp}')
                 
                 if resp.get('success') is True:
                     retry = 0
@@ -148,7 +184,14 @@ async def post_order(
     
     elif condition == 'buy':
         info('Executing BUY strategy...')
+        execution_asset = resolve_execution_asset()
+
+        if not execution_asset:
+            warning('Missing token id for buy order - skipping')
+            collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})
+            return
         
+        info(f'[ORDER TRACE] Resolved execution_asset={execution_asset}')
         info(f'Your balance: ${my_balance:.2f}')
         info(f'Trader bought: ${trade.get("usdcSize", 0):.2f}')
         
@@ -183,7 +226,7 @@ async def post_order(
         
         while remaining > 0 and retry < RETRY_LIMIT:
             try:
-                order_book = await clob_client.get_order_book(trade['asset'])
+                order_book = await clob_client.get_order_book(execution_asset)
                 if not order_book.get('asks') or len(order_book['asks']) == 0:
                     warning('No asks available in order book')
                     collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})
@@ -222,15 +265,18 @@ async def post_order(
                 
                 order_args = {
                     'side': 'BUY',
-                    'tokenID': trade['asset'],
+                    'tokenID': execution_asset,
                     'amount': order_size,
                     'price': float(min_price_ask['price']),
                 }
                 
                 info(f'Creating order: ${order_size:.2f} @ ${min_price_ask["price"]} (Balance: ${available_balance:.2f})')
                 
+                info(f'[ORDER TRACE] Creating signed order payload: {order_args}')
                 signed_order = await clob_client.create_market_order(order_args)
+                info('[ORDER TRACE] Submitting order to CLOB with type=FOK')
                 resp = await clob_client.post_order(signed_order, 'FOK')
+                info(f'[ORDER TRACE] CLOB response: {resp}')
                 
                 if resp.get('success') is True:
                     retry = 0
@@ -280,4 +326,3 @@ async def post_order(
         # Implementation similar to merge but for selling positions
         # This would be implemented based on the full TypeScript version
         collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})
-

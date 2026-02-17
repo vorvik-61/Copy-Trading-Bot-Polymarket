@@ -279,6 +279,7 @@ class ENV:
     # Network settings
     REQUEST_TIMEOUT_MS: int = int(os.getenv('REQUEST_TIMEOUT_MS', '10000'))
     NETWORK_RETRY_LIMIT: int = int(os.getenv('NETWORK_RETRY_LIMIT', '3'))
+    HTTP_TRACE_LOGS: bool = os.getenv('HTTP_TRACE_LOGS', 'true').lower() == 'true'
     # Trade aggregation settings
     TRADE_AGGREGATION_ENABLED: bool = os.getenv('TRADE_AGGREGATION_ENABLED', '').lower() == 'true'
     TRADE_AGGREGATION_WINDOW_SECONDS: int = int(os.getenv('TRADE_AGGREGATION_WINDOW_SECONDS', '300'))  # 5 minutes default

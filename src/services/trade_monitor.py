@@ -148,6 +148,14 @@ async def process_trade_activity(activity: Dict[str, Any], address: str):
             return  # Already processed this trade
         
         # Save new trade to database
+        info(
+            '[RTDS TRACE] '
+            f'proxy={activity.get("proxyWallet")}, tx={activity.get("transactionHash")}, '
+            f'side={activity.get("side")}, conditionId={activity.get("conditionId")}, '
+            f'asset={activity_asset}, size={activity.get("size")}, price={activity.get("price")}, '
+            f'outcome={activity.get("outcome")}, slug={activity.get("slug")}'
+        )
+
         new_activity = {
             'proxyWallet': activity.get('proxyWallet'),
             'timestamp': activity.get('timestamp'),
@@ -252,6 +260,7 @@ async def connect_rtds():
             'subscriptions': subscriptions,
         }
         
+        info(f'[RTDS TRACE] subscribe payload: {subscribe_message}')
         await ws.send(json.dumps(subscribe_message))
         success(f'Subscribed to RTDS for {len(USER_ADDRESSES)} trader(s) - monitoring in real-time')
         

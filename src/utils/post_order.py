@@ -71,6 +71,14 @@ async def post_order(
     """Post order to Polymarket"""
     collection = get_user_activity_collection(user_address)
 
+    info(
+        '[ORDER TRACE] '
+        f'condition={condition}, user={user_address[:6]}...{user_address[-4:]}, '
+        f'trade_side={trade.get("side")}, trade_asset={trade.get("asset")}, '
+        f'trade_condition_id={trade.get("conditionId")}, usdc_size={trade.get("usdcSize")}, '
+        f'price={trade.get("price")}, my_balance={my_balance:.4f}, user_balance={user_balance:.4f}'
+    )
+
     def resolve_execution_asset() -> Optional[str]:
         """Resolve the most reliable token id for book/order operations."""
         trade_asset = trade.get('asset')
@@ -136,8 +144,11 @@ async def post_order(
                         'price': float(max_price_bid['price']),
                     }
                 
+                info(f'[ORDER TRACE] Creating signed order payload: {order_args}')
                 signed_order = await clob_client.create_market_order(order_args)
+                info('[ORDER TRACE] Submitting order to CLOB with type=FOK')
                 resp = await clob_client.post_order(signed_order, 'FOK')
+                info(f'[ORDER TRACE] CLOB response: {resp}')
                 
                 if resp.get('success') is True:
                     retry = 0
@@ -180,6 +191,7 @@ async def post_order(
             collection.update_one({'_id': trade['_id']}, {'$set': {'bot': True}})
             return
         
+        info(f'[ORDER TRACE] Resolved execution_asset={execution_asset}')
         info(f'Your balance: ${my_balance:.2f}')
         info(f'Trader bought: ${trade.get("usdcSize", 0):.2f}')
         
@@ -260,8 +272,11 @@ async def post_order(
                 
                 info(f'Creating order: ${order_size:.2f} @ ${min_price_ask["price"]} (Balance: ${available_balance:.2f})')
                 
+                info(f'[ORDER TRACE] Creating signed order payload: {order_args}')
                 signed_order = await clob_client.create_market_order(order_args)
+                info('[ORDER TRACE] Submitting order to CLOB with type=FOK')
                 resp = await clob_client.post_order(signed_order, 'FOK')
+                info(f'[ORDER TRACE] CLOB response: {resp}')
                 
                 if resp.get('success') is True:
                     retry = 0

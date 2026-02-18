@@ -156,6 +156,13 @@ async def do_trading(clob_client: Any, trades: List[TradeWithUser]) -> None:
             }
         )
         
+        info(
+            '[EXEC TRACE] '
+            f'Preparing execution for tx={trade.get("transactionHash")}, '
+            f'side={trade.get("side")}, conditionId={trade.get("conditionId")}, '
+            f'asset={trade.get("asset")}, usdcSize={trade.get("usdcSize")}, price={trade.get("price")}'
+        )
+
         my_positions_data = await fetch_data_async(f'https://data-api.polymarket.com/positions?user={PROXY_WALLET}')
         user_positions_data = await fetch_data_async(f'https://data-api.polymarket.com/positions?user={trade["userAddress"]}')
         
@@ -211,6 +218,13 @@ async def do_aggregated_trading(clob_client: Any, aggregated_trades: List[Aggreg
                 {'$set': {'botExcutedTime': 1}}
             )
         
+        info(
+            '[EXEC TRACE] '
+            f'Aggregated execution for user={agg["userAddress"]}, conditionId={agg.get("conditionId")}, '
+            f'asset={agg.get("asset")}, side={agg.get("side")}, totalUsdc={agg.get("totalUsdcSize")}, '
+            f'avgPrice={agg.get("averagePrice")}'
+        )
+
         my_positions_data = await fetch_data_async(f'https://data-api.polymarket.com/positions?user={PROXY_WALLET}')
         user_positions_data = await fetch_data_async(f'https://data-api.polymarket.com/positions?user={agg["userAddress"]}')
         
